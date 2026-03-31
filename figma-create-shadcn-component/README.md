@@ -8,86 +8,48 @@ Give it a ShadCN component URL and a target Figma file, and it will:
 
 1. Fetch the component spec and identify all variants, sizes, and properties
 2. Check your Figma file for existing components, pages, and available icons
-3. Create the component with proper Figma variants and component properties
-4. Apply your design system tokens (not ShadCN defaults) for all colors and typography
-5. Run visual QA and report the result
+3. Scope the component for Figma — deciding what to include, what to simplify, and what to split
+4. Build the component with proper variants, properties, and design system tokens
+5. Run visual QA, set component documentation, and optionally create developer notes
 
 ## Prerequisites
 
-### 1. Tailwind Design System Figma Library
+- [Tailwind Design System - Semantic Tokens & Code Sync](https://www.figma.com/community/file/1526688065982358612) — Figma community library providing semantic color variables, Tailwind CSS primitives, and dual-font text styles
+- [Figma Console MCP](https://docs.figma-console-mcp.southleft.com/) — MCP server for Claude Code providing Plugin API access, component management, variable binding, and visual validation
 
-This skill is designed to work with the **Tailwind Design System - Semantic Tokens & Code Sync** Figma community file:
+## How it works
 
-https://www.figma.com/community/file/1526688065982358612
+### Design token mapping
 
-This library provides:
-- **Semantic color variables** (Surface, Edge, Brand, Neutral, Positive, Warning, Danger, Content) with Light/Dark modes
-- **Tailwind CSS primitive variables** as a complete Figma variable collection
-- **Semantic font styles** with a dual-font system (heading font + body font)
-- **Design-to-code sync** — variables map directly to Tailwind CSS utility classes
+ShadCN uses a flat token model (`--primary`, `--secondary`, `--destructive`). The skill maps these to a richer semantic system — `Brand/Default`, `Neutral/Tertiary`, `Danger/Default` — that supports light/dark modes, hover states, and additional semantics (Warning, Positive) that ShadCN doesn't cover. All color bindings use Figma variables, never hardcoded hex values.
 
-The skill's `rules.md` contains the mapping between ShadCN tokens and this library's semantic variables. If you customise your library (rename groups, change token structure), update `rules.md` to match.
+Typography follows the same principle. Rather than mapping ShadCN's Tailwind utility classes directly (e.g., `text-sm font-medium`), the skill determines the semantic font by component context — *what the text is*, not what CSS class it uses. A button label uses the **Button** font style, a dialog title uses **Title Small**, a form label uses **Label**. This preserves the dual-font system where heading/UI fonts stay distinct from body/content fonts.
 
-### 2. Figma Console MCP
+The full mapping tables live in `rules.md`.
 
-This skill requires the **Figma Console MCP** server for Claude Code:
+### Complexity-aware scoping
 
-https://docs.figma-console-mcp.southleft.com/
+Not every ShadCN component translates directly to Figma. Code components support unlimited dynamic children, conditional rendering, and composition patterns that don't map to Figma's component model. The skill handles this by assessing complexity upfront:
 
-Figma Console MCP provides 90+ purpose-built tools for design creation, component management, variable binding, and visual validation — including `figma_execute` for full Plugin API access and `figma_take_screenshot` for visual QA.
+**Simple components** (buttons, badges, inputs, avatars) have a manageable number of variants and a clear structure. The skill builds these directly after a brief property architecture check.
 
-Install and configure it before using this skill. The standard Figma MCP is supported as a fallback but has significantly fewer capabilities.
+**Complex components** (button groups, dialogs, data tables, navigation menus) have a combinatorial explosion of possible variants — styles x sizes x content patterns x item counts can produce hundreds of permutations. The skill scopes these down before building by walking through each dimension with you: which styles are needed, which sizes, how many slots, what conditional relationships exist between options. The goal is to identify what designers will actually use, not replicate every possible permutation.
 
-### 3. Cookiecutter Starter Repo (Optional)
+This scoping also decides what becomes a Figma variant property (visible in the variant picker) vs a boolean toggle (show/hide a layer) vs a separate component entirely. Getting this mapping right is what makes the difference between a component designers reach for daily and one they avoid.
 
-For engineers who want the full design-to-code pipeline, there's a companion cookiecutter repo that scaffolds a Tailwind + ShadCN project pre-configured with the same semantic token structure:
+### Icon handling
 
-> *Coming soon — link will be added here when available*
+When a ShadCN component includes icons, the skill searches your Figma file for matching icon components. If it can't find an exact match, it tries close alternatives (e.g., "arrow-down" for "chevron-down"). If nothing works, it uses a placeholder and tells you which icons need manual replacement.
 
-This gives you a codebase where the Figma variables and the CSS variables are already aligned, so components built with this skill can be implemented in code with matching token names.
+### Visual QA
 
-## Key Design Decisions
+The skill takes screenshots after each major creation step and runs a final QA pass checking spacing, alignment, color token bindings, typography styles, and variant completeness. It uses `figma_lint_design` for accessibility checks.
 
-### Context-first typography
+### Component documentation
 
-ShadCN components use raw Tailwind utility classes for fonts (e.g., `text-sm font-medium`). This skill does **not** blindly map those utilities. Instead, it determines the semantic font by asking *"what is this text?"*:
+Every component gets a description set on the component set node — visible when designers hover it in the assets panel. This includes what it is, which ShadCN component it maps to, and notable deviations.
 
-- A button label always uses the **Button** font style, regardless of what ShadCN's CSS says
-- A dialog title uses **Title Small** or **Subtitle Large**
-- A form label uses **Label** or **Label Bold**
-- Helper text uses **Body Small**
-
-This ensures the dual-font system is respected — heading/UI fonts stay distinct from body/content fonts.
-
-### Design system tokens over ShadCN defaults
-
-ShadCN uses a flat token model (`--primary`, `--secondary`, `--destructive`). This skill maps those to a richer semantic token system:
-
-| ShadCN | Design System | Why |
-|---|---|---|
-| `--primary` | `Brand/Default` | Brand identity, not generic "primary" |
-| `--destructive` | `Danger/Default` | Part of a full semantic set (also Warning, Positive) |
-| `--secondary` | `Neutral/Tertiary` | Correct visual weight for low-emphasis actions |
-| `--background` | `Surface/Default` | Named to avoid `bg-background` redundancy in Tailwind |
-| `--border` | `Edge/Default` | Named to avoid `border-border` redundancy in Tailwind |
-| `--muted` | `Surface/Secondary` | Maps to the right surface tier |
-
-The design system also extends beyond ShadCN with tokens ShadCN doesn't have: `Warning`, `Positive`, `Brand/Secondary`, `Brand/Tertiary`, hover states, and semantic content colors.
-
-### Smart complexity gating
-
-Not all components need the same level of planning:
-
-- **Simple components** (Button, Badge, Input, Avatar): the skill builds them immediately
-- **Complex components** (Dialog, DataTable, Command, NavigationMenu): the skill pauses and proposes a component strategy — what becomes a variant vs a property, whether to split into multiple Figma components — and waits for your confirmation
-
-### Graceful icon handling
-
-When a ShadCN component includes icons, the skill searches your Figma file for matching icon components. If it can't find an exact match, it tries close alternatives (e.g., "arrow-down" for "chevron-down"). If nothing works, it uses any available icon as a placeholder and tells you which icons need manual replacement.
-
-### Visual QA built in
-
-The skill takes screenshots after each major creation step and runs a final QA pass checking spacing, alignment, color tokens, typography, and variant completeness. It uses `figma_lint_design` for accessibility checks.
+After building, the skill offers to create **Developer Notes** — a standalone reference frame on the same page aimed at engineers reviewing the design file. These summarise what's included, known gaps vs the ShadCN spec (framed as extensible, not permanent), and property differences (framed as design-file ergonomics, not spec changes). All text in the notes uses the file's text styles and color variables.
 
 ## Usage
 
@@ -98,15 +60,17 @@ Create the button group component from https://ui.shadcn.com/docs/components/rad
 in https://www.figma.com/design/YOUR_FILE_KEY/Your-File-Name
 ```
 
-The skill handles the rest — fetching the spec, checking your file, building the component, and reporting back.
+The skill handles the rest — fetching the spec, checking your file, scoping, building, QA, and reporting back.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `SKILL.md` | Skill definition — the prompt and workflow the agent follows |
-| `rules.md` | Color and typography mapping rules — the source of truth for token decisions |
-| `README.md` | This file |
+| `SKILL.md` | Skill definition — the agent workflow across all phases |
+| `rules.md` | Color and typography mapping rules — source of truth for token decisions |
+| `references/scoping.md` | Detailed variant scoping and property architecture guide for complex components |
+| `examples/button.md` | Reference example — how a simple component was scoped and built, with deviation rationale |
+| `examples/button-group.md` | Reference example — how a complex component was scoped and built, with deviation rationale |
 
 ## Customisation
 
